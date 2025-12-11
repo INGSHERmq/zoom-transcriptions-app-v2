@@ -1,0 +1,208 @@
+{
+  "live": [
+    {
+      "id": "87356255026",
+      "uuid": "S1uyH1IxTG6GA4FJ133CaQ==",
+      "topic": "REUNIÓN DE COORDINACIÓN ACADÉMICA",
+      "host_email": "c9Urc0dUSS-ECFgIDsGoEg",
+      "start_time": "2025-12-10T17:25:25Z",
+      "status": "live"
+    },
+    {
+      "id": "86210839642",
+      "uuid": "EP8vdO4sQVqPlR4O1iNkEA==",
+      "topic": "TUTORÍA - LIC JEFF (MIÉRCOLES)",
+      "host_email": "2Ku6bskJRxywaEoeI7kiUw",
+      "start_time": "2025-12-10T19:58:48Z",
+      "detected_at": "2025-12-10T19:58:49.823Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "86270654420",
+      "uuid": "ABHfcmaFRbaxnVVV7Vk1fQ==",
+      "topic": "TUTORÍA SOCIOEMOCIONAL ENF+TEC.MED- GRUPO 5- PS.MARÍA BULNES ",
+      "host_email": "3clhkHIVQOy3YlDvaUBPxg",
+      "start_time": "2025-12-10T19:59:04Z",
+      "detected_at": "2025-12-10T19:59:05.044Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "84272073995",
+      "uuid": "j9C5LAwgTz6q9i70aLWHoA==",
+      "topic": "TUTORÍA - LIC ESTRELLA (MIÉRCOLES)",
+      "host_email": "icibNryWR4WM9XO30jV9og",
+      "start_time": "2025-12-10T20:00:02Z",
+      "detected_at": "2025-12-10T20:00:03.180Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "89469501821",
+      "uuid": "v9Yf1yz5QEyLM+HGoodNGw==",
+      "topic": "20242-P02A3125-Enfermeria en atención primaria  en  salud-BV-CH-EN|21418654|MIÉRCOLES 15:10-19:20-25",
+      "host_email": "b-9j7DJRQVGZbKL4G_-Uxw",
+      "start_time": "2025-12-10T20:04:47Z",
+      "detected_at": "2025-12-10T20:04:48.799Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "89855992754",
+      "uuid": "mSF4Ay2NSOm9TdeWtb1Z6Q==",
+      "topic": "TUTORÍA SOCIOEMOCIONAL M.H + F.I.C.A - GRUPO 4-PS.MARYLIN ORMEÑO",
+      "host_email": "3clhkHIVQOy3YlDvaUBPxg",
+      "start_time": "2025-12-10T20:06:15Z",
+      "detected_at": "2025-12-10T20:06:16.235Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "86008076147",
+      "uuid": "tCymWufIRBqEEBHzTP1lnQ==",
+      "topic": "202011-21AA4-Electivo 2 - Administración y Gerencia en Enfermería-BV-IC-EN|40160212|MIÉRCOLES 15:10-",
+      "host_email": "bsPqIvx5Qe-f2-p-DZovjQ",
+      "start_time": "2025-12-10T20:06:15Z",
+      "detected_at": "2025-12-10T20:06:16.755Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "84830877061",
+      "uuid": "iTWd5/h+Sg+Juwk3dz32mg==",
+      "topic": "20251-P31B2119-Cultura Inclusiva-BV-IC-MH|21461801|MIÉRCOLES 16:00-19:20-200",
+      "host_email": "zyOIi2aORAiS522zdr01bQ",
+      "start_time": "2025-12-10T20:54:51Z",
+      "detected_at": "2025-12-10T20:54:51.975Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "85456820842",
+      "uuid": "t+IOAK/4TheeQNH6YE97Tw==",
+      "topic": "202011-21A25-Taller de Investigación I-BV-CH-EN|21536202|MIÉRCOLES 16:00-20:10-250",
+      "host_email": "zyOIi2aORAiS522zdr01bQ",
+      "start_time": "2025-12-10T20:59:22Z",
+      "detected_at": "2025-12-10T20:59:23.683Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "85002260260",
+      "uuid": "kM3lC9Z2RiWVtpMD2jjpYw==",
+      "topic": "202011-P062140-Taller Investigación II-BV2-CH-IN|32942379|MIÉRCOLES 16:00-19:20-200",
+      "host_email": "bsPqIvx5Qe-f2-p-DZovjQ",
+      "start_time": "2025-12-10T21:02:02Z",
+      "detected_at": "2025-12-10T21:02:03.494Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "84422351885",
+      "uuid": "x444ZwfgS3axUBT2bM+1QQ==",
+      "topic": "20251-P31B2120-Inmunologia-BV-IC-MH|21525109|MIÉRCOLES 16:00-19:20-200",
+      "host_email": "OUR5UYsfQbiy0lhKc6l73w",
+      "start_time": "2025-12-10T21:04:23Z",
+      "detected_at": "2025-12-10T21:04:24.886Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "87422167454",
+      "uuid": "V8CbpvTFSSikL6dsQQQsJQ==",
+      "topic": " TELECONSULTA MÉDICA - DR. WALKER ALIAGA SIHUAS - SERVICIO DE SALUD - CAMPUS ICA - DBU",
+      "host_email": "9lgier1uTC-wlYBdlmc4kw",
+      "start_time": "2025-12-10T21:25:40Z",
+      "detected_at": "2025-12-10T21:25:41.485Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    },
+    {
+      "id": "85708040398",
+      "uuid": "Sb78J9rBTKaz6FGJnC1O1Q==",
+      "topic": "COORDINACIÓN PRESUPUESTO PROINNOVATE",
+      "host_email": "C2i4LJ7FRF-uL2ziJIWyEA",
+      "start_time": "2025-12-10T21:25:53Z",
+      "detected_at": "2025-12-10T21:25:54.354Z",
+      "scheduled_start_time": null,
+      "status": "live"
+    }
+  ],
+  "finalizadas": [
+    {
+      "id": "89187941857",
+      "uuid": "IbEV3S+WQLSqMP3jjGx+Ew==",
+      "topic": "Reunión Zoom de Direccion Comercial y de Marketing",
+      "host_email": "wkWAXarLRrW5c_Gb8Uuk4A",
+      "start_time": "2025-12-10T21:16:53Z",
+      "detected_at": "2025-12-10T21:21:58.478Z",
+      "scheduled_start_time": null,
+      "status": "finalizada",
+      "end_time": "2025-12-10T21:22:26.050Z",
+      "duration": 90
+    },
+    {
+      "id": "81055388930",
+      "uuid": "EKAckhPHQc+GPlWxeHrqbw==",
+      "topic": "202011-21A25-Taller de Investigación I-EV-IC-EN|21536202|MIÉRCOLES 11:50-16:00-250",
+      "host_email": "2TWXljRYQf2iCfDD320b2w",
+      "start_time": "2025-12-10T16:48:47Z",
+      "status": "finalizada",
+      "end_time": "2025-12-10T20:59:15.709Z",
+      "duration": 250
+    },
+    {
+      "id": "81687521568",
+      "uuid": "nD2I6jqwQwmN8rU5PPfV0w==",
+      "topic": "ENTREVISTAS PSICOPEDAGÓGICAS",
+      "host_email": "icibNryWR4WM9XO30jV9og",
+      "start_time": "2025-12-10T19:35:51Z",
+      "detected_at": "2025-12-10T19:35:52.930Z",
+      "scheduled_start_time": null,
+      "status": "finalizada",
+      "end_time": "2025-12-10T20:11:53.257Z",
+      "duration": 720
+    },
+    {
+      "id": "87356255026",
+      "uuid": "GTslj8ZyTGa5PBR3bK3jkg==",
+      "topic": "REUNIÓN DE COORDINACIÓN ACADÉMICA",
+      "host_email": "c9Urc0dUSS-ECFgIDsGoEg",
+      "start_time": "2025-12-10T17:19:26Z",
+      "status": "finalizada",
+      "end_time": "2025-12-10T17:20:13.293Z",
+      "duration": 60
+    },
+    {
+      "id": "86920660505",
+      "uuid": "6L2Lxo20QsqYpBm70Kyn+g==",
+      "topic": "TUTORÍA SOCIOEMOCIONAL PSI+OBS- GRUPO 3-PS.FRESSIA MANRIQUE",
+      "host_email": "3clhkHIVQOy3YlDvaUBPxg",
+      "start_time": "2025-12-10T16:44:59Z",
+      "status": "finalizada",
+      "end_time": "2025-12-10T16:50:17.367Z",
+      "duration": 120
+    },
+    {
+      "id": "86920660505",
+      "uuid": "QXFbyxhDT8CfzwHhL8icFw==",
+      "topic": "TUTORÍA SOCIOEMOCIONAL PSI+OBS- GRUPO 3-PS.FRESSIA MANRIQUE",
+      "host_email": "3clhkHIVQOy3YlDvaUBPxg",
+      "start_time": "2025-12-10T16:33:30Z",
+      "status": "finalizada",
+      "end_time": "2025-12-10T16:41:16.604Z",
+      "duration": 120
+    },
+    {
+      "id": "85168613674",
+      "uuid": "dCltYGJIRLSVhBUKJ7hNJw==",
+      "topic": "03-PRUEBA SHER LOCAL",
+      "host_email": "GaEYaCGgTweIVjpnQEtMnQ",
+      "start_time": "2025-12-10T16:34:03Z",
+      "status": "finalizada",
+      "end_time": "2025-12-10T16:37:47.519Z",
+      "duration": 47
+    }
+  ]
+}
