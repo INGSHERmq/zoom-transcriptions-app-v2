@@ -1,14 +1,25 @@
+// src/services/zoomApi.js
 import axios from 'axios'
 
-const API = 'http://localhost:5000/api'
+const API_BASE = 'https://c73c2cb2b8aa.ngrok-free.app'
+
+// Configuración de axios para ngrok
+const axiosInstance = axios.create({
+  baseURL: API_BASE,
+  headers: {
+    'ngrok-skip-browser-warning': 'true',  // ← ESTO EVITA LA PÁGINA DE ADVERTENCIA
+    'Content-Type': 'application/json'
+  }
+})
 
 export const zoomApi = {
   getMeetings: async () => {
-    const res = await axios.get(`${API}/meetings`)
+    const res = await axiosInstance.get('/api/meetings')
     return res.data
   },
+
   getTranscript: async (uuid) => {
-    const res = await axios.get(`${API}/meeting/${uuid}/transcript`)
+    const res = await axiosInstance.get(`/api/transcript/${encodeURIComponent(uuid)}`)
     return res.data
   }
 }
