@@ -1,84 +1,252 @@
-// src/components/MeetingDetail.jsx
-import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { zoomApi } from '../services/zoomApi'
-import { formatDate } from '../utils/formatDate'
+//frontend\src\components\MeetingDetail.jsx
+import { useEffect, useState, useRef } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { claseApi } from '../services/claseApi'; // ✅ ahora usamos claseApi
+import { formatDate } from '../utils/formatDate';
 
 export default function MeetingDetail() {
-  const { uuid } = useParams()
-  const [info, setInfo] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const { uuid } = useParams();
+  const [clase, setClase] = useState(null); // ✅ renombrado a "clase"
+  const [loading, setLoading] = useState(true);
+  const [notification, setNotification] = useState(null);
+  const [error, setError] = useState(null);
+  const [transcript, setTranscript] = useState(null);
+
+  const hasTranscriptionRef = useRef(false);
+  const intervalRef = useRef(null);
+
+const formatDateSafe = (date) => {
+  if (!date) return '—';
+  return formatDate(date); 
+};
 
   useEffect(() => {
-    zoomApi.getTranscript(uuid)
-      .then(setInfo)
-      .finally(() => setLoading(false))
-  }, [uuid])
+    console.log('📌 UUID desde URL:', uuid);
 
-  if (loading) return <div className="p-20 text-center text-2xl">Cargando detalle...</div>
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-  const c = info.meeting
+        // ✅ Cargar solo los datos de la clase (rápido)
+        const data = await claseApi.getClaseDetalle(uuid);
+        setClase(data);
+        console.log('✅ Clase cargada:', data);
 
-  const tardanza = c.delay_minutes
-  const esTardanza = tardanza !== null && tardanza > 0
-  const esTemprano = tardanza !== null && tardanza < 0
+        // Si ya tiene transcripción (guardada en BD), usarla
+        if (data.transcription) {
+          setTranscript(data.transcription);
+          hasTranscriptionRef.current = true;
+          setNotification({
+            topic: data.topic || 'Clase',
+            id: data.id,
+            occurrence: data.occurrence_id
+          });
+          setTimeout(() => setNotification(null), 5000);
+        }
+      } catch (err) {
+        console.error('❌ Error al cargar clase:', err);
+        setError(err.message || 'Error al cargar la clase');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+
+    // Polling: solo busca transcripción si aún no la tiene
+    intervalRef.current = setInterval(async () => {
+      if (hasTranscriptionRef.current || !clase) return;
+
+      try {
+        // ✅ Solicitar transcripción explícitamente
+        const result = await claseApi.getTranscript(uuid);
+        const newTranscript = result?.transcript;
+
+        if (newTranscript && !hasTranscriptionRef.current) {
+          setTranscript(newTranscript);
+          hasTranscriptionRef.current = true;
+          setNotification({
+            topic: clase.topic || 'Clase',
+            id: clase.id,
+            occurrence: clase.occurrence_id
+          });
+          setTimeout(() => setNotification(null), 5000);
+        }
+      } catch (err) {
+        console.warn('⚠️ Error al verificar transcripción:', err.message);
+      }
+    }, 30000);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [uuid]);
+
+  const closeNotification = () => {
+    setNotification(null);
+  };
+
+  if (error) {
+    return (
+      <div className="p-20 text-center">
+        <p className="text-2xl text-red-600 font-bold mb-4">❌ Error: {error}</p>
+        <Link to="/" className="text-indigo-600 hover:underline mt-4 inline-block">
+          ← Volver al dashboard
+        </Link>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="p-20 text-center">
+        <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-2xl text-gray-600">Cargando detalle...</p>
+      </div>
+    );
+  }
+
+  if (!clase) {
+    return (
+      <div className="p-20 text-center">
+        <p className="text-2xl text-red-600 font-bold mb-4">🤷 No se encontraron datos</p>
+        <Link to="/" className="text-indigo-600 hover:underline mt-4 inline-block">
+          ← Volver al dashboard
+        </Link>
+      </div>
+    );
+  }
+
+  // ✅ Usamos directamente `clase` (viene de Supabase)
+  const c = clase;
+
+  // === Cálculos ===
+  let finTeorico = '—';
+  try {
+    if (c.scheduled_start && c.duration_minutes) {
+      const start = new Date(c.scheduled_start);
+      if (!isNaN(start.getTime())) {
+        finTeorico = formatDate(new Date(start.getTime() + c.duration_minutes * 60000));
+      }
+    }
+  } catch (e) {
+    console.error('Error fin teórico:', e);
+  }
+
+  let duracionReal = '—';
+  try {
+    if (c.actual_start && c.actual_end) {
+      const start = new Date(c.actual_start);
+      const end = new Date(c.actual_end);
+      if (!isNaN(start) && !isNaN(end)) {
+        duracionReal = `${Math.round((end - start) / 60000)} min`;
+      }
+    } else if (c.duration_minutes) {
+      duracionReal = `${c.duration_minutes} min`;
+    }
+  } catch (e) {
+    console.error('Error duración real:', e);
+  }
+
+  let tardanzaTexto = '—';
+  let tardanzaClase = 'text-gray-700';
+  const tardanza = c.delay_minutes ?? null;
+  if (tardanza !== null) {
+    if (tardanza > 0) {
+      tardanzaTexto = `⚠️ +${tardanza} min tarde`;
+      tardanzaClase = 'text-red-600';
+    } else if (tardanza < 0) {
+      tardanzaTexto = `✅ ${Math.abs(tardanza)} min antes`;
+      tardanzaClase = 'text-green-600';
+    } else {
+      tardanzaTexto = '✅ A tiempo';
+    }
+  }
+
+  const enCurso = !c.actual_end && c.status === 'live';
 
   return (
     <div className="min-h-screen bg-gray-100 p-8">
+      {/* Notificación */}
+      {notification && (
+        <div className="fixed top-4 right-4 z-50 animate-slide-in">
+          <div className="bg-green-600 text-white rounded-lg shadow-2xl p-6 max-w-md flex items-start gap-4">
+            <div className="w-6 h-6 flex-shrink-0 mt-1">
+              <svg className="w-full h-full" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-bold text-lg mb-1">🎉 ¡Transcripción Disponible!</h3>
+              <p className="text-sm opacity-95">
+                Transcripción lista para: <strong>{notification.topic}</strong>
+              </p>
+              <p className="text-xs opacity-80 mt-2">
+                ID: {notification.id}
+                {notification.occurrence && ` • Ocurrencia: ${notification.occurrence}`}
+              </p>
+            </div>
+            <button onClick={closeNotification} className="text-white hover:bg-green-700 rounded p-1">✕</button>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-5xl mx-auto">
         <Link to="/" className="inline-block mb-8 text-indigo-600 hover:underline text-lg font-medium">
           ← Volver al dashboard
         </Link>
 
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
-          {/* Header con título y estado */}
           <div className="bg-gradient-to-r from-indigo-600 to-purple-700 text-white p-8">
-            <h1 className="text-4xl font-bold mb-4">{c.topic}</h1>
+            <h1 className="text-4xl font-bold mb-4">{c.topic || 'Sin título'}</h1>
             <p className="text-xl opacity-90">Host: {c.host_email || '—'}</p>
+            <p className="text-lg opacity-75 mt-2">
+              Estado: <span className="font-bold">{c.status || '—'}</span>
+              {enCurso && <span className="ml-2 text-green-300">● EN CURSO</span>}
+            </p>
           </div>
 
           <div className="p-10 space-y-8">
-            {/* Resumen de horarios */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="bg-gray-50 rounded-2xl p-6 border-l-8 border-indigo-600">
                 <h3 className="text-2xl font-bold text-gray-800 mb-4">Horario Programado</h3>
-                <p className="text-lg"><strong>Inicio:</strong> {formatDate(c.scheduled_start)}</p>
-                <p className="text-lg"><strong>Fin teórico:</strong> {c.theoretical_end ? formatDate(c.theoretical_end) : '—'}</p>
+                <p className="text-lg mb-3"><strong>Inicio:</strong> {formatDateSafe(c.scheduled_start)}</p>
+                <p className="text-lg"><strong>Fin teórico:</strong> {finTeorico}</p>
               </div>
 
               <div className="bg-gray-50 rounded-2xl p-6 border-l-8 border-green-600">
                 <h3 className="text-2xl font-bold text-gray-800 mb-4">Horario Real</h3>
-                <p className="text-lg"><strong>Inicio real:</strong> {formatDate(c.actual_start)}</p>
-                <p className={`
-                  text-2xl font-bold mt-3
-                  ${esTardanza ? 'text-red-600' : 
-                    esTemprano ? 'text-green-600' : 
-                    'text-gray-700'}
-                `}>
-                  {esTardanza && `⚠️ +${tardanza} min tarde`}
-                  {esTemprano && `✅ ${Math.abs(tardanza)} min antes`}
-                  {tardanza === 0 && `✅ A tiempo`}
-                  {tardanza === null && `—`}
-                </p>
-                <p className="text-lg mt-4"><strong>Fin real:</strong> {c.actual_end ? formatDate(c.actual_end) : 'En curso'}</p>
-                <p className="text-lg"><strong>Duración real:</strong> {c.duration_minutes || '—'} min</p>
+                <p className="text-lg mb-3"><strong>Inicio real:</strong> {formatDateSafe(c.actual_start)}</p>
+                {tardanza !== null && (
+                  <p className={`text-2xl font-bold mb-3 ${tardanzaClase}`}>{tardanzaTexto}</p>
+                )}
+                <p className="text-lg mb-3"><strong>Fin real:</strong> {enCurso ? 'En curso' : formatDateSafe(c.actual_end)}</p>
+                <p className="text-lg"><strong>Duración real:</strong> {duracionReal}</p>
               </div>
             </div>
 
-            {/* Transcripción */}
             <div className="bg-gray-50 rounded-2xl p-8">
               <h2 className="text-3xl font-bold text-gray-800 mb-6">Transcripción completa</h2>
-              {info.transcript ? (
+              {transcript ? (
                 <pre className="whitespace-pre-wrap font-sans text-lg leading-relaxed text-gray-800 bg-white p-6 rounded-xl shadow">
-                  {info.transcript}
+                  {transcript}
                 </pre>
               ) : (
-                <p className="text-xl text-gray-500">Transcripción no disponible aún</p>
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 border-4 border-gray-300 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-xl text-gray-500 font-medium">
+                    {enCurso ? '⏳ Clase en curso - transcripción disponible al finalizar' : '📄 Transcripción no disponible aún'}
+                  </p>
+                  {!enCurso && <p className="text-sm text-gray-400 mt-2">🔄 Verificando cada 30 segundos...</p>}
+                </div>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      <style>{`@keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } } .animate-slide-in { animation: slide-in 0.3s ease-out; }`}</style>
     </div>
-  )
+  );
 }

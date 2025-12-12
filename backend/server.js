@@ -13,6 +13,15 @@ app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf.toString()
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 const ZOOM_WEBHOOK_SECRET = process.env.ZOOM_WEBHOOK_SECRET;
 
+// === MIDDLEWARE DE AUTENTICACIÓN (solo bloquea en producción) ===
+const authenticateApiKey = (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+  if (process.env.NODE_ENV === 'production' && apiKey !== process.env.API_SECRET) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+  next();
+};
+
 // === TOKEN ZOOM CACHÉ ===
 let cachedToken = null;
 let tokenExpires = 0;
@@ -36,7 +45,6 @@ const getToken = async () => {
 const findBestOccurrence = async (meetingId, occurrenceId, startTime) => {
   console.log(`🔍 Buscando mejor ocurrencia para meeting_id=${meetingId}`);
   
-  // 1. Si hay occurrence_id, buscar exacto
   if (occurrenceId) {
     const { data } = await supabase
       .from("classes")
@@ -45,53 +53,25 @@ const findBestOccurrence = async (meetingId, occurrenceId, startTime) => {
       .eq("occurrence_id", String(occurrenceId))
       .maybeSingle();
     
-    if (data) {
-      console.log(`✓ Encontrada por occurrence_id exacto: ${occurrenceId}`);
-      return data;
-    }
+    if (data) return data;
   }
 
-  // 2. Buscar todas las ocurrencias de esta reunión
   const { data: allOccurrences } = await supabase
     .from("classes")
     .select("*")
     .eq("zoom_meeting_id", String(meetingId))
     .order("scheduled_start", { ascending: true });
 
-  if (!allOccurrences || allOccurrences.length === 0) {
-    console.log(`❌ No hay registros para meeting_id=${meetingId}`);
-    return null;
-  }
+  if (!allOccurrences || allOccurrences.length === 0) return null;
 
-  console.log(`📋 ${allOccurrences.length} ocurrencias encontradas`);
-
-  // 3. Filtrar solo las que NO han iniciado aún
   const pending = allOccurrences.filter(c => !c.actual_start && c.status === "scheduled");
-  
-  if (pending.length === 0) {
-    console.log(`⚠️ No hay ocurrencias pendientes, usando la más cercana de todas`);
-    // Fallback: buscar la más cercana aunque ya haya iniciado
-    const actualStart = new Date(startTime);
-    let closest = allOccurrences[0];
-    let minDiff = Math.abs(new Date(allOccurrences[0].scheduled_start) - actualStart);
-
-    for (const occ of allOccurrences) {
-      const diff = Math.abs(new Date(occ.scheduled_start) - actualStart);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closest = occ;
-      }
-    }
-    console.log(`✓ Seleccionada (fallback): ${closest.scheduled_start} (id=${closest.id})`);
-    return closest;
-  }
-
-  // 4. De las pendientes, elegir la más cercana a la hora actual
+  const candidates = pending.length > 0 ? pending : allOccurrences;
   const actualStart = new Date(startTime);
-  let closest = pending[0];
-  let minDiff = Math.abs(new Date(pending[0].scheduled_start) - actualStart);
+  
+  let closest = candidates[0];
+  let minDiff = Math.abs(new Date(candidates[0].scheduled_start) - actualStart);
 
-  for (const occ of pending) {
+  for (const occ of candidates) {
     const diff = Math.abs(new Date(occ.scheduled_start) - actualStart);
     if (diff < minDiff) {
       minDiff = diff;
@@ -99,7 +79,6 @@ const findBestOccurrence = async (meetingId, occurrenceId, startTime) => {
     }
   }
 
-  console.log(`✓ Mejor coincidencia: ${closest.scheduled_start} (diff: ${Math.round(minDiff/60000)}min, id=${closest.id})`);
   return closest;
 };
 
@@ -112,7 +91,6 @@ app.post("/webhook", async (req, res) => {
     const hash = crypto.createHmac("sha256", ZOOM_WEBHOOK_SECRET).update(msg).digest("hex");
     const expected = `v0=${hash}`;
 
-    // Validación de URL
     if (req.body.event === "endpoint.url_validation") {
       const hashValidate = crypto.createHmac("sha256", ZOOM_WEBHOOK_SECRET)
         .update(req.body.payload.plainToken)
@@ -154,61 +132,37 @@ app.post("/webhook", async (req, res) => {
           ignoreDuplicates: false
         });
 
-        console.log(`✓ Sesión guardada: ${meeting.topic} | ${startTime} | occ: ${occ.occurrence_id || 'única'}`);
+        console.log(`✓ Sesión guardada: ${meeting.topic} | ${startTime}`);
       }
-
-      console.log(`CLASE CREADA → ${meeting.topic} (${occurrences.length} sesiones)`);
     }
 
-    // 2. REUNIÓN INICIADA - CON BÚSQUEDA INTELIGENTE
+    // 2. REUNIÓN INICIADA
     if (req.body.event === "meeting.started") {
       const occurrenceId = m.occurrence_id ? String(m.occurrence_id) : null;
-      
-      console.log("=".repeat(80));
-      console.log("📥 MEETING.STARTED");
-      console.log("=".repeat(80));
-      console.log(`🔍 meeting_id: ${m.id}`);
-      console.log(`🔍 occurrence_id: ${occurrenceId || 'NO ENVIADO'}`);
-      console.log(`🔍 uuid: ${m.uuid}`);
-      console.log(`🔍 start_time: ${m.start_time}`);
-      console.log("=".repeat(80));
-
       const actualStart = new Date(m.start_time.endsWith('Z') ? m.start_time : m.start_time + 'Z');
 
-      // USAR BÚSQUEDA INTELIGENTE
       const existing = await findBestOccurrence(m.id, occurrenceId, actualStart);
 
       if (!existing) {
-        console.log(`🆕 NO EXISTE → Creando registro (CASO EXCEPCIONAL)`);
-        
-        const scheduled = actualStart;
-        const delayMinutes = 0;
-
-        const { data: inserted, error: insertError } = await supabase.from("classes").insert({
+        const { data: inserted } = await supabase.from("classes").insert({
           zoom_meeting_id: String(m.id),
           zoom_uuid: m.uuid,
           occurrence_id: occurrenceId,
           topic: m.topic || "Sin título",
           host_email: m.host_email || m.host_id,
-          scheduled_start: scheduled.toISOString(),
+          scheduled_start: actualStart.toISOString(),
           actual_start: actualStart.toISOString(),
           status: "live",
-          delay_minutes: delayMinutes,
+          delay_minutes: 0,
           duration_minutes: m.duration || 60
         }).select();
 
-        if (insertError) {
-          console.error("❌ Error insertando:", insertError);
-        } else {
-          console.log(`✅ CLASE INICIADA (creada) id=${inserted[0]?.id}`);
-        }
+        console.log(`✅ Clase iniciada (creada) id=${inserted[0]?.id}`);
       } else {
-        console.log(`♻️ ACTUALIZANDO EXISTENTE id=${existing.id}`);
-        
         const scheduled = new Date(existing.scheduled_start);
         const delayMinutes = Math.round((actualStart - scheduled) / 60000);
 
-        const { error: updateError } = await supabase
+        await supabase
           .from("classes")
           .update({
             actual_start: actualStart.toISOString(),
@@ -218,29 +172,15 @@ app.post("/webhook", async (req, res) => {
           })
           .eq("id", existing.id);
 
-        if (updateError) {
-          console.error("❌ Error actualizando:", updateError);
-        } else {
-          console.log(`✅ CLASE INICIADA (actualizada) - delay: ${delayMinutes}min`);
-        }
+        console.log(`✅ Clase iniciada (actualizada) delay: ${delayMinutes}min`);
       }
     }
 
-    // 3. REUNIÓN FINALIZADA - CON BÚSQUEDA INTELIGENTE
+    // 3. REUNIÓN FINALIZADA
     if (req.body.event === "meeting.ended") {
       const occurrenceId = m.occurrence_id ? String(m.occurrence_id) : null;
       
-      console.log("=".repeat(80));
-      console.log("🔚 MEETING.ENDED");
-      console.log("=".repeat(80));
-      console.log(`🔍 meeting_id: ${m.id}`);
-      console.log(`🔍 occurrence_id: ${occurrenceId || 'NO ENVIADO'}`);
-      console.log(`🔍 uuid: ${m.uuid}`);
-      console.log("=".repeat(80));
-
-      // BUSCAR POR UUID (más confiable para reuniones activas)
       let existing = null;
-
       if (m.uuid) {
         const { data } = await supabase
           .from("classes")
@@ -248,26 +188,19 @@ app.post("/webhook", async (req, res) => {
           .eq("zoom_uuid", m.uuid)
           .eq("status", "live")
           .maybeSingle();
-
-        if (data) {
-          existing = data;
-          console.log(`✓ Encontrada por UUID (status=live)`);
-        }
+        existing = data;
       }
 
-      // Fallback: buscar por meeting_id + occurrence_id
       if (!existing) {
         existing = await findBestOccurrence(m.id, occurrenceId, new Date());
       }
 
       if (!existing) {
-        console.error("❌ NO SE ENCONTRÓ LA CLASE ACTIVA");
+        console.warn("⚠️ No se encontró la clase activa");
         return res.status(200).send("OK - Not found");
       }
 
-      console.log(`📌 Finalizando clase: id=${existing.id}`);
-
-      const { error: updateError } = await supabase
+      await supabase
         .from("classes")
         .update({
           actual_end: new Date().toISOString(),
@@ -276,18 +209,13 @@ app.post("/webhook", async (req, res) => {
         })
         .eq("id", existing.id);
 
-      if (updateError) {
-        console.error("❌ Error actualizando estado:", updateError);
-      } else {
-        console.log(`✅ CLASE FINALIZADA: ${existing.topic}`);
-      }
+      console.log(`✅ Clase finalizada: ${existing.topic}`);
     }
 
-    res.status(200).send("OK");
+    res.status(200).json({ status: "OK" });
   } catch (e) {
-    console.error("ERROR WEBHOOK:", e.message);
-    if (e.response?.data) console.error(e.response.data);
-    res.status(500).send("Error");
+    console.error("❌ ERROR WEBHOOK:", e.message);
+    res.status(500).json({ error: "Internal error" });
   }
 });
 
@@ -299,7 +227,9 @@ app.get("/api/meetings", async (req, res) => {
 
     const live = all.filter(c => c.status === "live");
     const ended = all.filter(c => c.status === "ended");
-    const scheduled = all.filter(c => c.status === "scheduled" && c.scheduled_start && new Date(c.scheduled_start) > now);
+    const scheduled = all.filter(c => 
+      c.status === "scheduled" && c.scheduled_start && new Date(c.scheduled_start) > now
+    );
     const noAperturadas = all.filter(c => 
       c.status === "scheduled" && 
       c.scheduled_start && 
@@ -314,40 +244,174 @@ app.get("/api/meetings", async (req, res) => {
   }
 });
 
-// === TRANSCRIPCIÓN + DETALLE ===
+// === ✅ ENDPOINT: Detalle de clase (soporta ocurrencias) ===
+app.get("/api/clase/:uuid", async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const { occurrence_id } = req.query;
+    const decodedUuid = decodeURIComponent(uuid);
+
+    console.log("=".repeat(80));
+    console.log("🔍 GET /api/clase/:uuid");
+    console.log("   UUID:", decodedUuid);
+    console.log("   Occurrence ID:", occurrence_id || "NO ESPECIFICADO");
+    console.log("=".repeat(80));
+
+    let clase = null;
+
+    if (occurrence_id) {
+      // Buscar por occurrence_id específico
+      console.log("   → Buscando por occurrence_id exacto...");
+      const { data, error } = await supabase
+        .from("classes")
+        .select("*")
+        .eq("zoom_uuid", decodedUuid)
+        .eq("occurrence_id", occurrence_id)
+        .maybeSingle();
+      
+      if (error) console.error("   ❌ Error Supabase:", error);
+      clase = data;
+      
+      if (clase) {
+        console.log(`   ✅ Encontrada por occurrence_id: ${clase.id}`);
+      }
+    } else {
+      // ✅ Si no hay occurrence_id, devolver la PRIMERA por fecha (ascendente)
+      console.log("   → No hay occurrence_id, buscando primera ocurrencia por fecha...");
+      const { data, error } = await supabase
+        .from("classes")
+        .select("*")
+        .eq("zoom_uuid", decodedUuid)
+        .order("scheduled_start", { ascending: true })
+        .limit(1);
+      
+      if (error) {
+        console.error("   ❌ Error Supabase:", error);
+      }
+      
+      // ✅ CRÍTICO: data es un array, tomar el primer elemento
+      clase = data && data.length > 0 ? data[0] : null;
+      
+      if (clase) {
+        console.log(`   ✅ Primera ocurrencia seleccionada: ID=${clase.id} | Occurrence=${clase.occurrence_id} | ${clase.scheduled_start}`);
+      }
+    }
+
+    if (!clase) {
+      console.log("   ❌ No se encontró ninguna clase");
+      
+      // Debug: mostrar todas las ocurrencias disponibles
+      const { data: allOccurrences } = await supabase
+        .from("classes")
+        .select("id, occurrence_id, scheduled_start, status, topic")
+        .eq("zoom_uuid", decodedUuid);
+      
+      console.log("📋 Ocurrencias disponibles para este UUID:");
+      allOccurrences?.forEach(c => 
+        console.log(`   - ID: ${c.id} | Occurrence: ${c.occurrence_id} | ${c.scheduled_start} | ${c.status}`)
+      );
+      
+      return res.status(404).json({ 
+        error: "Clase no encontrada",
+        buscado: { uuid: decodedUuid, occurrence_id: occurrence_id || null },
+        disponibles: allOccurrences
+      });
+    }
+
+    console.log(`   ✅ RESPUESTA ENVIADA: ID=${clase.id}`);
+    res.json(clase);
+    
+  } catch (err) {
+    console.error("❌ Error en /api/clase:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// === ✅ ENDPOINT: Transcripción ===
 app.get("/api/transcript/:uuid", async (req, res) => {
   try {
     const { uuid } = req.params;
+    const { occurrence_id } = req.query;
     const decodedUuid = decodeURIComponent(uuid);
-    const token = await getToken();
 
-    const meetingRes = await axios.get(`https://api.zoom.us/v2/past_meetings/${decodedUuid}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const meeting = meetingRes.data;
+    console.log("🔍 GET /api/transcript/:uuid");
+    console.log("   UUID:", decodedUuid);
+    console.log("   Occurrence ID:", occurrence_id || "NO ESPECIFICADO");
 
+    let clase = null;
+
+    if (occurrence_id) {
+      const { data } = await supabase
+        .from("classes")
+        .select("*")
+        .eq("zoom_uuid", decodedUuid)
+        .eq("occurrence_id", occurrence_id)
+        .maybeSingle();
+      clase = data;
+    } else {
+      const { data } = await supabase
+        .from("classes")
+        .select("*")
+        .eq("zoom_uuid", decodedUuid)
+        .order("scheduled_start", { ascending: true })
+        .limit(1);
+      
+      // ✅ Tomar primer elemento del array
+      clase = data && data.length > 0 ? data[0] : null;
+    }
+
+    if (!clase) {
+      return res.status(404).json({ meeting: {}, transcript: null });
+    }
+
+    console.log(`   ✅ Clase encontrada: ${clase.id}`);
+
+    // Obtener transcripción de Zoom
     let transcript = null;
     try {
+      const token = await getToken();
       const tr = await axios.get(`https://api.zoom.us/v2/past_meetings/${decodedUuid}/transcripts`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       transcript = tr.data.transcripts?.[0]?.transcript || null;
-    } catch (_) {}
+    } catch (err) {
+      console.warn("⚠️ Transcripción no disponible:", err.message);
+    }
 
-    res.json({ meeting, transcript });
+    res.json({
+      meeting: clase,
+      transcript
+    });
+
   } catch (err) {
-    console.error("Error transcript:", err.message);
+    console.error("❌ Error en /api/transcript:", err.message);
     res.status(500).json({ meeting: {}, transcript: null });
+  }
+});
+
+// === HEALTH CHECK ===
+app.get("/health", async (req, res) => {
+  try {
+    await supabase.from('classes').select('id').limit(1);
+    await getToken();
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  } catch (e) {
+    res.status(503).json({ status: "error", error: e.message });
   }
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log("");
-  console.log("🚀 BACKEND CON BÚSQUEDA INTELIGENTE DE OCURRENCIAS");
-  console.log(`http://localhost:${PORT}`);
-  console.log("→ Prioriza ocurrencia más cercana si Zoom no envía occurrence_id");
-  console.log("→ Evita duplicados en reuniones recurrentes");
-  console.log("→ Usa UUID para finalizar clases activas");
-  console.log("");
+  console.log(`
+🚀 BACKEND ZOOM TRANSCRIPT CORREGIDO Y ACTUALIZADO
+==================================================
+📡 Puerto: ${PORT}
+🔒 CORS: ${process.env.NODE_ENV === 'production' ? 'RESTRINGIDO' : 'DEVELOPMENT'}
+📊 Health: http://localhost:${PORT}/health
+✅ Endpoints disponibles:
+   - GET /api/meetings → lista de clases (Supabase)
+   - GET /api/clase/:uuid → detalle de clase (Supabase)
+   - GET /api/transcript/:uuid → transcripción (Zoom API)
+==================================================
+  `);
 });
