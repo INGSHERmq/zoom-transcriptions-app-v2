@@ -1,7 +1,7 @@
 // src/services/zoomApi.js
 import axios from 'axios'
 
-const API_BASE = 'https://9a1f906bbd4b.ngrok-free.app'
+const API_BASE = 'https://46dbeac0d3e8.ngrok-free.app'
 
 // Configuración de axios para ngrok
 const axiosInstance = axios.create({

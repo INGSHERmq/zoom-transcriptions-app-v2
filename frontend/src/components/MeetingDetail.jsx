@@ -1,92 +1,123 @@
 //frontend\src\components\MeetingDetail.jsx
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { claseApi } from '../services/claseApi'; // ✅ ahora usamos claseApi
+import { claseApi } from '../services/claseApi';
 import { formatDate } from '../utils/formatDate';
 
 export default function MeetingDetail() {
   const { uuid } = useParams();
-  const [clase, setClase] = useState(null); // ✅ renombrado a "clase"
+  const [clase, setClase] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState(null);
   const [error, setError] = useState(null);
-  const [transcript, setTranscript] = useState(null);
+  
+  // Control de polling
+  const pollingIntervalRef = useRef(null);
+  const mountedRef = useRef(true);
 
-  const hasTranscriptionRef = useRef(false);
-  const intervalRef = useRef(null);
+  const formatDateSafe = (date) => {
+    if (!date) return '—';
+    return formatDate(date); 
+  };
 
-const formatDateSafe = (date) => {
-  if (!date) return '—';
-  return formatDate(date); 
-};
+  // 🔄 Función para verificar transcripción
+  const checkTranscription = useCallback(async () => {
+    if (!mountedRef.current) return;
 
+    try {
+      const result = await claseApi.getTranscript(uuid);
+      const newTranscript = result?.transcript;
+
+      if (newTranscript && mountedRef.current) {
+        // Actualizar el estado de la clase con la transcripción
+        setClase(prev => ({
+          ...prev,
+          transcription: newTranscript
+        }));
+
+        // Mostrar notificación
+        setNotification({
+          topic: clase?.topic || 'Clase',
+          id: clase?.id,
+          occurrence: clase?.occurrence_id
+        });
+        setTimeout(() => {
+          if (mountedRef.current) setNotification(null);
+        }, 5000);
+
+        // Detener polling
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ Error al verificar transcripción:', err.message);
+    }
+  }, [uuid, clase?.topic, clase?.id, clase?.occurrence_id]);
+
+  // 📥 Cargar datos iniciales
   useEffect(() => {
-    console.log('📌 UUID desde URL:', uuid);
-
+    mountedRef.current = true;
+    
     const loadData = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        // ✅ Cargar solo los datos de la clase (rápido)
         const data = await claseApi.getClaseDetalle(uuid);
+        
+        if (!mountedRef.current) return;
+        
         setClase(data);
         console.log('✅ Clase cargada:', data);
 
-        // Si ya tiene transcripción (guardada en BD), usarla
+        // Si ya tiene transcripción, mostrar notificación y no hacer polling
         if (data.transcription) {
-          setTranscript(data.transcription);
-          hasTranscriptionRef.current = true;
           setNotification({
             topic: data.topic || 'Clase',
             id: data.id,
             occurrence: data.occurrence_id
           });
-          setTimeout(() => setNotification(null), 5000);
+          setTimeout(() => {
+            if (mountedRef.current) setNotification(null);
+          }, 5000);
+        } else {
+          // Si NO tiene transcripción, iniciar polling
+          console.log('🔄 Iniciando polling para transcripción...');
+          pollingIntervalRef.current = setInterval(checkTranscription, 30000);
+          
+          // Verificar inmediatamente
+          checkTranscription();
         }
       } catch (err) {
         console.error('❌ Error al cargar clase:', err);
-        setError(err.message || 'Error al cargar la clase');
+        if (mountedRef.current) {
+          setError(err.message || 'Error al cargar la clase');
+        }
       } finally {
-        setLoading(false);
+        if (mountedRef.current) {
+          setLoading(false);
+        }
       }
     };
 
     loadData();
 
-    // Polling: solo busca transcripción si aún no la tiene
-    intervalRef.current = setInterval(async () => {
-      if (hasTranscriptionRef.current || !clase) return;
-
-      try {
-        // ✅ Solicitar transcripción explícitamente
-        const result = await claseApi.getTranscript(uuid);
-        const newTranscript = result?.transcript;
-
-        if (newTranscript && !hasTranscriptionRef.current) {
-          setTranscript(newTranscript);
-          hasTranscriptionRef.current = true;
-          setNotification({
-            topic: clase.topic || 'Clase',
-            id: clase.id,
-            occurrence: clase.occurrence_id
-          });
-          setTimeout(() => setNotification(null), 5000);
-        }
-      } catch (err) {
-        console.warn('⚠️ Error al verificar transcripción:', err.message);
-      }
-    }, 30000);
-
+    // Cleanup
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      mountedRef.current = false;
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
     };
-  }, [uuid]);
+  }, [uuid, checkTranscription]);
 
   const closeNotification = () => {
     setNotification(null);
   };
 
+  // === RENDER STATES ===
   if (error) {
     return (
       <div className="p-20 text-center">
@@ -118,10 +149,10 @@ const formatDateSafe = (date) => {
     );
   }
 
-  // ✅ Usamos directamente `clase` (viene de Supabase)
+  // === CÁLCULOS SIMPLES (solo presentación) ===
   const c = clase;
 
-  // === Cálculos ===
+  // Fin teórico (para mostrar)
   let finTeorico = '—';
   try {
     if (c.scheduled_start && c.duration_minutes) {
@@ -134,6 +165,7 @@ const formatDateSafe = (date) => {
     console.error('Error fin teórico:', e);
   }
 
+  // Duración real (para mostrar)
   let duracionReal = '—';
   try {
     if (c.actual_start && c.actual_end) {
@@ -149,20 +181,34 @@ const formatDateSafe = (date) => {
     console.error('Error duración real:', e);
   }
 
-  let tardanzaTexto = '—';
-  let tardanzaClase = 'text-gray-700';
-  const tardanza = c.delay_minutes ?? null;
-  if (tardanza !== null) {
-    if (tardanza > 0) {
-      tardanzaTexto = `⚠️ +${tardanza} min tarde`;
-      tardanzaClase = 'text-red-600';
-    } else if (tardanza < 0) {
-      tardanzaTexto = `✅ ${Math.abs(tardanza)} min antes`;
-      tardanzaClase = 'text-green-600';
-    } else {
-      tardanzaTexto = '✅ A tiempo';
-    }
-  }
+  // ✅ PUNTUALIDAD VIENE DEL BACKEND
+  const punctuality = c.punctuality || { start: {}, end: {} };
+  
+  // Helpers para CSS
+  const getStatusColor = (status) => {
+    if (status === 'late' || status === 'early') return 'text-red-600';
+    if (status === 'on_time') return 'text-green-600';
+    return 'text-gray-700';
+  };
+
+  const getStatusIcon = (status) => {
+    if (status === 'late' || status === 'early') return '⚠️';
+    if (status === 'on_time') return '✅';
+    return '';
+  };
+
+  // Para el caso especial del inicio (early es bueno)
+  const getStartStatusColor = (status) => {
+    if (status === 'late') return 'text-red-600';
+    if (status === 'early' || status === 'on_time') return 'text-green-600';
+    return 'text-gray-700';
+  };
+
+  const getStartStatusIcon = (status) => {
+    if (status === 'late') return '⚠️';
+    if (status === 'early' || status === 'on_time') return '✅';
+    return '';
+  };
 
   const enCurso = !c.actual_end && c.status === 'live';
 
@@ -218,19 +264,32 @@ const formatDateSafe = (date) => {
               <div className="bg-gray-50 rounded-2xl p-6 border-l-8 border-green-600">
                 <h3 className="text-2xl font-bold text-gray-800 mb-4">Horario Real</h3>
                 <p className="text-lg mb-3"><strong>Inicio real:</strong> {formatDateSafe(c.actual_start)}</p>
-                {tardanza !== null && (
-                  <p className={`text-2xl font-bold mb-3 ${tardanzaClase}`}>{tardanzaTexto}</p>
+                
+                {/* ✅ Indicador de puntualidad de INICIO (del backend) */}
+                {punctuality.start.message !== '—' && (
+                  <p className={`text-xl font-bold mb-4 ${getStartStatusColor(punctuality.start.status)}`}>
+                    {getStartStatusIcon(punctuality.start.status)} {punctuality.start.message}
+                  </p>
                 )}
+                
                 <p className="text-lg mb-3"><strong>Fin real:</strong> {enCurso ? 'En curso' : formatDateSafe(c.actual_end)}</p>
+                
+                {/* ✅ Indicador de puntualidad de FIN (del backend) */}
+                {!enCurso && punctuality.end.message !== '—' && (
+                  <p className={`text-xl font-bold mb-4 ${getStatusColor(punctuality.end.status)}`}>
+                    {getStatusIcon(punctuality.end.status)} {punctuality.end.message}
+                  </p>
+                )}
+                
                 <p className="text-lg"><strong>Duración real:</strong> {duracionReal}</p>
               </div>
             </div>
 
             <div className="bg-gray-50 rounded-2xl p-8">
               <h2 className="text-3xl font-bold text-gray-800 mb-6">Transcripción completa</h2>
-              {transcript ? (
+              {c.transcription ? (
                 <pre className="whitespace-pre-wrap font-sans text-lg leading-relaxed text-gray-800 bg-white p-6 rounded-xl shadow">
-                  {transcript}
+                  {c.transcription}
                 </pre>
               ) : (
                 <div className="text-center py-8">

@@ -1,4 +1,4 @@
-﻿// server.js - CORRECCIÓN: Búsqueda inteligente de ocurrencias
+﻿// server.js - COMPLETO CON CÁLCULO DE PUNTUALIDAD
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
@@ -80,6 +80,82 @@ const findBestOccurrence = async (meetingId, occurrenceId, startTime) => {
   }
 
   return closest;
+};
+
+// === ✅ FUNCIÓN: Calcular Puntualidad ===
+/**
+ * Calcula los indicadores de puntualidad para inicio y fin de clase
+ * @param {Object} clase - Objeto de la clase desde Supabase
+ * @returns {Object} - Objeto con punctuality data
+ */
+const calculatePunctuality = (clase) => {
+  const result = {
+    start: { status: null, minutes: null, message: '—' },
+    end: { status: null, minutes: null, message: '—' }
+  };
+
+  // === PUNTUALIDAD DE INICIO ===
+  if (clase.delay_minutes !== null && clase.delay_minutes !== undefined) {
+    const delay = clase.delay_minutes;
+    
+    if (delay > 0) {
+      result.start = {
+        status: 'late',
+        minutes: delay,
+        message: `Empezó ${delay} min tarde`
+      };
+    } else if (delay < 0) {
+      result.start = {
+        status: 'early',
+        minutes: Math.abs(delay),
+        message: `Empezó ${Math.abs(delay)} min antes`
+      };
+    } else {
+      result.start = {
+        status: 'on_time',
+        minutes: 0,
+        message: 'Empezó a tiempo'
+      };
+    }
+  }
+
+  // === PUNTUALIDAD DE FIN ===
+  try {
+    if (clase.scheduled_start && clase.duration_minutes && clase.actual_end) {
+      const scheduledStart = new Date(clase.scheduled_start);
+      const scheduledEnd = new Date(scheduledStart.getTime() + clase.duration_minutes * 60000);
+      const actualEnd = new Date(clase.actual_end);
+      
+      if (!isNaN(scheduledEnd.getTime()) && !isNaN(actualEnd.getTime())) {
+        const diffMs = actualEnd - scheduledEnd;
+        const diffMinutes = Math.round(diffMs / 60000);
+        
+        if (diffMinutes > 0) {
+          result.end = {
+            status: 'late',
+            minutes: diffMinutes,
+            message: `Terminó ${diffMinutes} min tarde`
+          };
+        } else if (diffMinutes < 0) {
+          result.end = {
+            status: 'early',
+            minutes: Math.abs(diffMinutes),
+            message: `Terminó ${Math.abs(diffMinutes)} min antes`
+          };
+        } else {
+          result.end = {
+            status: 'on_time',
+            minutes: 0,
+            message: 'Terminó a tiempo'
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error calculando puntualidad de fin:', err);
+  }
+
+  return result;
 };
 
 // === WEBHOOKS ===
@@ -244,7 +320,7 @@ app.get("/api/meetings", async (req, res) => {
   }
 });
 
-// === ✅ ENDPOINT: Detalle de clase (soporta ocurrencias) ===
+// === ✅ ENDPOINT: Detalle de clase CON PUNTUALIDAD ===
 app.get("/api/clase/:uuid", async (req, res) => {
   try {
     const { uuid } = req.params;
@@ -260,7 +336,6 @@ app.get("/api/clase/:uuid", async (req, res) => {
     let clase = null;
 
     if (occurrence_id) {
-      // Buscar por occurrence_id específico
       console.log("   → Buscando por occurrence_id exacto...");
       const { data, error } = await supabase
         .from("classes")
@@ -276,7 +351,6 @@ app.get("/api/clase/:uuid", async (req, res) => {
         console.log(`   ✅ Encontrada por occurrence_id: ${clase.id}`);
       }
     } else {
-      // ✅ Si no hay occurrence_id, devolver la PRIMERA por fecha (ascendente)
       console.log("   → No hay occurrence_id, buscando primera ocurrencia por fecha...");
       const { data, error } = await supabase
         .from("classes")
@@ -289,7 +363,6 @@ app.get("/api/clase/:uuid", async (req, res) => {
         console.error("   ❌ Error Supabase:", error);
       }
       
-      // ✅ CRÍTICO: data es un array, tomar el primer elemento
       clase = data && data.length > 0 ? data[0] : null;
       
       if (clase) {
@@ -300,7 +373,6 @@ app.get("/api/clase/:uuid", async (req, res) => {
     if (!clase) {
       console.log("   ❌ No se encontró ninguna clase");
       
-      // Debug: mostrar todas las ocurrencias disponibles
       const { data: allOccurrences } = await supabase
         .from("classes")
         .select("id, occurrence_id, scheduled_start, status, topic")
@@ -318,8 +390,19 @@ app.get("/api/clase/:uuid", async (req, res) => {
       });
     }
 
+    // ✅ CALCULAR PUNTUALIDAD EN EL BACKEND
+    const punctuality = calculatePunctuality(clase);
+
+    // ✅ AGREGAR AL RESPONSE
+    const response = {
+      ...clase,
+      punctuality
+    };
+
     console.log(`   ✅ RESPUESTA ENVIADA: ID=${clase.id}`);
-    res.json(clase);
+    console.log(`   📊 Puntualidad calculada:`, punctuality);
+    
+    res.json(response);
     
   } catch (err) {
     console.error("❌ Error en /api/clase:", err.message);
@@ -356,7 +439,6 @@ app.get("/api/transcript/:uuid", async (req, res) => {
         .order("scheduled_start", { ascending: true })
         .limit(1);
       
-      // ✅ Tomar primer elemento del array
       clase = data && data.length > 0 ? data[0] : null;
     }
 
@@ -403,15 +485,15 @@ app.get("/health", async (req, res) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`
-🚀 BACKEND ZOOM TRANSCRIPT CORREGIDO Y ACTUALIZADO
-==================================================
+🚀 BACKEND ZOOM TRANSCRIPT CON CÁLCULO DE PUNTUALIDAD
+======================================================
 📡 Puerto: ${PORT}
 🔒 CORS: ${process.env.NODE_ENV === 'production' ? 'RESTRINGIDO' : 'DEVELOPMENT'}
 📊 Health: http://localhost:${PORT}/health
 ✅ Endpoints disponibles:
    - GET /api/meetings → lista de clases (Supabase)
-   - GET /api/clase/:uuid → detalle de clase (Supabase)
+   - GET /api/clase/:uuid → detalle de clase CON punctuality (Supabase)
    - GET /api/transcript/:uuid → transcripción (Zoom API)
-==================================================
+======================================================
   `);
 });
