@@ -1,4 +1,4 @@
-//frontend\src\components\MeetingDetail.jsx
+// frontend\src\components\MeetingDetail.jsx
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { claseApi } from '../services/claseApi';
@@ -20,32 +20,35 @@ export default function MeetingDetail() {
     return formatDate(date); 
   };
 
-  // 🔄 Función para verificar transcripción
+  // 🔄 Función para verificar transcripción (ACTUALIZADA)
   const checkTranscription = useCallback(async () => {
     if (!mountedRef.current) return;
 
     try {
       const result = await claseApi.getTranscript(uuid);
       const newTranscript = result?.transcript;
+      const updatedMeeting = result?.meeting;
 
       if (newTranscript && mountedRef.current) {
-        // Actualizar el estado de la clase con la transcripción
+        // Actualizar el estado completo con datos frescos del backend
         setClase(prev => ({
           ...prev,
+          ...updatedMeeting,
           transcription: newTranscript
         }));
 
-        // Mostrar notificación
+        // Notificación con información actualizada
         setNotification({
-          topic: clase?.topic || 'Clase',
-          id: clase?.id,
-          occurrence: clase?.occurrence_id
+          topic: updatedMeeting?.topic || 'Clase',
+          id: updatedMeeting?.id,
+          occurrence: updatedMeeting?.occurrence_id
         });
+
         setTimeout(() => {
           if (mountedRef.current) setNotification(null);
         }, 5000);
 
-        // Detener polling
+        // Detener el polling una vez que llega la transcripción
         if (pollingIntervalRef.current) {
           clearInterval(pollingIntervalRef.current);
           pollingIntervalRef.current = null;
@@ -54,7 +57,7 @@ export default function MeetingDetail() {
     } catch (err) {
       console.warn('⚠️ Error al verificar transcripción:', err.message);
     }
-  }, [uuid, clase?.topic, clase?.id, clase?.occurrence_id]);
+  }, [uuid]);
 
   // 📥 Cargar datos iniciales
   useEffect(() => {
@@ -72,7 +75,7 @@ export default function MeetingDetail() {
         setClase(data);
         console.log('✅ Clase cargada:', data);
 
-        // Si ya tiene transcripción, mostrar notificación y no hacer polling
+        // Si ya tiene transcripción al cargar → mostrar notificación
         if (data.transcription) {
           setNotification({
             topic: data.topic || 'Clase',
@@ -83,11 +86,11 @@ export default function MeetingDetail() {
             if (mountedRef.current) setNotification(null);
           }, 5000);
         } else {
-          // Si NO tiene transcripción, iniciar polling
+          // Si NO tiene → iniciar polling
           console.log('🔄 Iniciando polling para transcripción...');
           pollingIntervalRef.current = setInterval(checkTranscription, 30000);
           
-          // Verificar inmediatamente
+          // Verificar inmediatamente también
           checkTranscription();
         }
       } catch (err) {
@@ -104,7 +107,7 @@ export default function MeetingDetail() {
 
     loadData();
 
-    // Cleanup
+    // Cleanup al desmontar
     return () => {
       mountedRef.current = false;
       if (pollingIntervalRef.current) {
@@ -152,7 +155,7 @@ export default function MeetingDetail() {
   // === CÁLCULOS SIMPLES (solo presentación) ===
   const c = clase;
 
-  // Fin teórico (para mostrar)
+  // Fin teórico
   let finTeorico = '—';
   try {
     if (c.scheduled_start && c.duration_minutes) {
@@ -165,7 +168,7 @@ export default function MeetingDetail() {
     console.error('Error fin teórico:', e);
   }
 
-  // Duración real (para mostrar)
+  // Duración real
   let duracionReal = '—';
   try {
     if (c.actual_start && c.actual_end) {
@@ -181,10 +184,10 @@ export default function MeetingDetail() {
     console.error('Error duración real:', e);
   }
 
-  // ✅ PUNTUALIDAD VIENE DEL BACKEND
+  // PUNTUALIDAD (viene del backend)
   const punctuality = c.punctuality || { start: {}, end: {} };
   
-  // Helpers para CSS
+  // Helpers para colores e iconos
   const getStatusColor = (status) => {
     if (status === 'late' || status === 'early') return 'text-red-600';
     if (status === 'on_time') return 'text-green-600';
@@ -197,7 +200,6 @@ export default function MeetingDetail() {
     return '';
   };
 
-  // Para el caso especial del inicio (early es bueno)
   const getStartStatusColor = (status) => {
     if (status === 'late') return 'text-red-600';
     if (status === 'early' || status === 'on_time') return 'text-green-600';
@@ -265,7 +267,7 @@ export default function MeetingDetail() {
                 <h3 className="text-2xl font-bold text-gray-800 mb-4">Horario Real</h3>
                 <p className="text-lg mb-3"><strong>Inicio real:</strong> {formatDateSafe(c.actual_start)}</p>
                 
-                {/* ✅ Indicador de puntualidad de INICIO (del backend) */}
+                {/* Puntualidad de INICIO */}
                 {punctuality.start.message !== '—' && (
                   <p className={`text-xl font-bold mb-4 ${getStartStatusColor(punctuality.start.status)}`}>
                     {getStartStatusIcon(punctuality.start.status)} {punctuality.start.message}
@@ -274,7 +276,7 @@ export default function MeetingDetail() {
                 
                 <p className="text-lg mb-3"><strong>Fin real:</strong> {enCurso ? 'En curso' : formatDateSafe(c.actual_end)}</p>
                 
-                {/* ✅ Indicador de puntualidad de FIN (del backend) */}
+                {/* Puntualidad de FIN */}
                 {!enCurso && punctuality.end.message !== '—' && (
                   <p className={`text-xl font-bold mb-4 ${getStatusColor(punctuality.end.status)}`}>
                     {getStatusIcon(punctuality.end.status)} {punctuality.end.message}

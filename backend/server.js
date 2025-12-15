@@ -178,38 +178,92 @@ app.post("/webhook", async (req, res) => {
 
     const m = req.body.payload.object;
 
-    // 1. REUNIÓN CREADA
+    // 1. REUNIÓN CREADA (VERSIÓN CORREGIDA Y ROBUSTA)
     if (req.body.event === "meeting.created") {
       const token = await getToken();
-      const detail = await axios.get(`https://api.zoom.us/v2/meetings/${m.id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      let detail;
+      try {
+        detail = await axios.get(`https://api.zoom.us/v2/meetings/${m.id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (err) {
+        console.error("❌ Error obteniendo detalle de reunión creada:", err.response?.data || err.message);
+        return res.status(200).send("OK - Skip detail");
+      }
 
       const meeting = detail.data;
-      const occurrences = meeting.occurrences?.length > 0
-        ? meeting.occurrences
-        : [{ start_time: meeting.start_time, occurrence_id: null }];
 
-      for (const occ of occurrences) {
-        const startTime = occ.start_time.endsWith('Z') ? occ.start_time : occ.start_time + 'Z';
+      // Construir lista de ocurrencias de forma segura
+      let occurrences = [];
 
-        await supabase.from("classes").upsert({
-          zoom_meeting_id: meeting.id,
-          zoom_uuid: meeting.uuid,
-          occurrence_id: occ.occurrence_id || null,
-          topic: meeting.topic || "Sin título",
-          host_email: meeting.host_email || meeting.host_id,
-          scheduled_start: startTime,
-          duration_minutes: meeting.duration || 60,
-          created_at: meeting.created_at || new Date().toISOString(),
-          status: "scheduled"
-        }, {
-          onConflict: ["zoom_meeting_id", "occurrence_id"],
-          ignoreDuplicates: false
-        });
-
-        console.log(`✓ Sesión guardada: ${meeting.topic} | ${startTime}`);
+      if (meeting.occurrences && Array.isArray(meeting.occurrences) && meeting.occurrences.length > 0) {
+        occurrences = meeting.occurrences;
+      } else {
+        // Si no hay occurrences explícitas, usar la reunión principal como única ocurrencia
+        occurrences = [{
+          occurrence_id: null,
+          start_time: meeting.start_time,
+          duration: meeting.duration
+        }];
       }
+
+      // Procesar cada ocurrencia
+      for (const occ of occurrences) {
+        let startTimeIso = null;
+
+        // Prioridad 1: start_time de la ocurrencia
+        if (occ.start_time) {
+          let timeStr = String(occ.start_time).trim();
+          if (timeStr && !timeStr.endsWith('Z') && !timeStr.endsWith('+00:00')) {
+            timeStr += 'Z';
+          }
+          startTimeIso = timeStr;
+        }
+        // Prioridad 2: fallback a start_time de la reunión principal
+        else if (meeting.start_time) {
+          let timeStr = String(meeting.start_time).trim();
+          if (timeStr && !timeStr.endsWith('Z') && !timeStr.endsWith('+00:00')) {
+            timeStr += 'Z';
+          }
+          startTimeIso = timeStr;
+        }
+
+        // Si no hay fecha válida → saltar esta ocurrencia
+        if (!startTimeIso || startTimeIso === 'Z') {
+          console.warn(`⚠️ Saltando ocurrencia sin fecha válida - Meeting ID: ${meeting.id}, Occ ID: ${occ.occurrence_id || 'principal'}`);
+          continue;
+        }
+
+        const durationMin = occ.duration || meeting.duration || 60;
+
+        try {
+          const { error } = await supabase.from("classes").upsert({
+            zoom_meeting_id: String(meeting.id),
+            zoom_uuid: meeting.uuid || null,
+            occurrence_id: occ.occurrence_id || null,
+            topic: meeting.topic || "Sin título",
+            host_email: meeting.host_email || meeting.host_id || "desconocido",
+            scheduled_start: startTimeIso,
+            duration_minutes: durationMin,
+            created_at: meeting.created_at || new Date().toISOString(),
+            status: "scheduled"
+          }, {
+            onConflict: ["zoom_meeting_id", "occurrence_id"],
+            ignoreDuplicates: false
+          });
+
+          if (error) {
+            console.error("❌ Error upsert clase programada:", error);
+          } else {
+            console.log(`✓ Sesión PROGRAMADA guardada: "${meeting.topic}" | ${startTimeIso} | Dur: ${durationMin}min | Occ: ${occ.occurrence_id || 'principal'}`);
+          }
+        } catch (err) {
+          console.error("❌ Excepción al guardar clase programada:", err.message);
+        }
+      }
+
+      res.status(200).json({ status: "OK" });
+      return;
     }
 
     // 2. REUNIÓN INICIADA
@@ -410,7 +464,7 @@ app.get("/api/clase/:uuid", async (req, res) => {
   }
 });
 
-// === ✅ ENDPOINT: Transcripción ===
+// === ✅ ENDPOINT: Transcripción (DESCARGA DE ZOOM Y GUARDA EN SUPABASE) ===
 app.get("/api/transcript/:uuid", async (req, res) => {
   try {
     const { uuid } = req.params;
@@ -421,6 +475,7 @@ app.get("/api/transcript/:uuid", async (req, res) => {
     console.log("   UUID:", decodedUuid);
     console.log("   Occurrence ID:", occurrence_id || "NO ESPECIFICADO");
 
+    // 1. Buscar la clase en Supabase (igual que antes)
     let clase = null;
 
     if (occurrence_id) {
@@ -443,26 +498,81 @@ app.get("/api/transcript/:uuid", async (req, res) => {
     }
 
     if (!clase) {
+      console.log("   ❌ Clase no encontrada");
       return res.status(404).json({ meeting: {}, transcript: null });
     }
 
-    console.log(`   ✅ Clase encontrada: ${clase.id}`);
+    console.log(`   ✅ Clase encontrada: ID=${clase.id} | Status=${clase.status}`);
 
-    // Obtener transcripción de Zoom
-    let transcript = null;
-    try {
-      const token = await getToken();
-      const tr = await axios.get(`https://api.zoom.us/v2/past_meetings/${decodedUuid}/transcripts`, {
-        headers: { Authorization: `Bearer ${token}` }
+    // 2. Si YA tiene transcripción guardada en BD → devolverla directamente
+    if (clase.transcription) {
+      console.log(`   📄 Transcripción ya guardada en Supabase (${clase.transcription.length} caracteres)`);
+      return res.json({
+        meeting: clase,
+        transcript: clase.transcription
       });
-      transcript = tr.data.transcripts?.[0]?.transcript || null;
-    } catch (err) {
-      console.warn("⚠️ Transcripción no disponible:", err.message);
     }
 
+    // 3. Si NO tiene transcripción → intentar descargarla de Zoom
+    let downloadedTranscript = null;
+
+    // Solo intentar descargar si la reunión ya terminó
+    if (clase.status === "ended" || clase.actual_end) {
+      try {
+        const token = await getToken();
+
+        // Endpoint correcto: obtienes los recordings (incluye transcripción)
+        const recordingsRes = await axios.get(
+          `https://api.zoom.us/v2/past_meetings/${decodedUuid}/recordings`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        const recordingFiles = recordingsRes.data.recording_files || [];
+        const transcriptFile = recordingFiles.find(file => file.file_type === "TRANSCRIPT");
+
+        if (transcriptFile && transcriptFile.download_url) {
+          // Zoom requiere access_token en query para descargar
+          const downloadUrl = `${transcriptFile.download_url}?access_token=${token}`;
+
+          const transcriptRes = await axios.get(downloadUrl, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          downloadedTranscript = transcriptRes.data.trim();
+
+          // ¡GUARDAR EN SUPABASE!
+          const { error } = await supabase
+            .from("classes")
+            .update({
+              transcription: downloadedTranscript,
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", clase.id);
+
+          if (error) {
+            console.error("   ❌ Error guardando transcripción en Supabase:", error);
+          } else {
+            console.log(`   ✅ Transcripción DESCARGADA y GUARDADA en Supabase (${downloadedTranscript.length} caracteres)`);
+            clase.transcription = downloadedTranscript; // actualizar objeto local
+          }
+        } else {
+          console.log("   ⏳ Transcripción no disponible aún en Zoom (procesando o no activada)");
+        }
+      } catch (err) {
+        if (err.response?.status === 404) {
+          console.log("   ⚠️ No hay recordings en Zoom (quizás no se grabó en nube)");
+        } else {
+          console.error("   ❌ Error descargando transcripción de Zoom:", err.message);
+        }
+      }
+    } else {
+      console.log("   ⏳ Clase aún no ha terminado → no buscar transcripción todavía");
+    }
+
+    // 4. Respuesta final al frontend
     res.json({
       meeting: clase,
-      transcript
+      transcript: downloadedTranscript || clase.transcription || null
     });
 
   } catch (err) {
