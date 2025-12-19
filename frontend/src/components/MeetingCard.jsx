@@ -4,6 +4,10 @@ import { formatDate } from '../utils/formatDate'
 
 export default function MeetingCard({ meeting, type = 'past' }) {
   const isLive = type === 'live'
+  const isNoAperturada = type === 'noAperturadas'
+
+  // Botón supervisor solo en Live y No aperturadas
+  const showSupervisorButton = (isLive || isNoAperturada) && meeting.supervisor_url
 
   return (
     <div className="relative rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-300">
@@ -17,7 +21,7 @@ export default function MeetingCard({ meeting, type = 'past' }) {
       `} />
 
       <div className="p-6 bg-white">
-        {/* Título con hasta 3 líneas */}
+        {/* Título */}
         <h3 className="text-xl font-bold text-gray-800 mb-4 line-clamp-3 leading-tight">
           {meeting.topic}
         </h3>
@@ -53,7 +57,25 @@ export default function MeetingCard({ meeting, type = 'past' }) {
           )}
         </div>
 
-        {/* Botón solo en finalizadas */}
+        {/* BOTÓN SUPERVISOR */}
+        {showSupervisorButton && (
+          <div className="mt-6">
+            <a
+              href={meeting.supervisor_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`block text-center font-bold py-3 rounded-lg transition text-white shadow-md hover:shadow-lg ${
+                isNoAperturada 
+                  ? 'bg-red-600 hover:bg-red-700' 
+                  : 'bg-purple-600 hover:bg-purple-700'
+              }`}
+            >
+              {isNoAperturada ? '🔥 ABRIR COMO SUPERVISOR' : '👤 SUPERVISAR SIN RESTRICCIONES'}
+            </a>
+          </div>
+        )}
+
+        {/* Botón ver transcripción (solo finalizadas) */}
         {type === 'ended' && (
           <div className="mt-6">
             <Link
@@ -65,7 +87,7 @@ export default function MeetingCard({ meeting, type = 'past' }) {
           </div>
         )}
 
-        {/* Punto parpadeante en vivo */}
+        {/* Indicador live */}
         {isLive && (
           <div className="absolute top-4 right-4">
             <span className="flex h-4 w-4">

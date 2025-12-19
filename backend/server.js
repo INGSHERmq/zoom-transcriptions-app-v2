@@ -31,14 +31,29 @@ const getToken = async () => {
   return cachedToken;
 };
 
-// === 🔧 FUNCIÓN CENTRALIZADA: Descargar transcripción y video de Zoom ===
+// === SUPERVISOR: Función para obtener start_url (privilegios de host) ===
+const getSupervisorUrl = async (meetingId) => {
+  if (!meetingId) return null;
+  const token = await getToken();
+  try {
+    const res = await axios.get(`https://api.zoom.us/v2/meetings/${meetingId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 10000
+    });
+    return res.data.start_url || null;
+  } catch (err) {
+    console.log(`❌ Error obteniendo supervisor_url para ${meetingId}: ${err.response?.status || err.message}`);
+    return null;
+  }
+};
+
+// === FUNCIÓN CENTRALIZADA: Descargar transcripción y video de Zoom ===
 const downloadTranscriptAndVideoFromZoom = async (clase) => {
   const token = await getToken();
   console.log(`   📥 Buscando grabación: "${clase.topic}" (ID: ${clase.id})`);
   
   let recordingsRes;
   
-  // MÉTODO 1: UUID doble-encodeado
   if (clase.zoom_uuid) {
     try {
       const doubleEncodedUuid = encodeURIComponent(encodeURIComponent(clase.zoom_uuid));
@@ -51,7 +66,6 @@ const downloadTranscriptAndVideoFromZoom = async (clase) => {
     }
   }
   
-  // MÉTODO 2: Meeting ID
   if (!recordingsRes && clase.zoom_meeting_id) {
     try {
       recordingsRes = await axios.get(
@@ -63,7 +77,6 @@ const downloadTranscriptAndVideoFromZoom = async (clase) => {
     }
   }
   
-  // MÉTODO 3: Buscar en recordings del host
   if (!recordingsRes && clase.host_email && clase.actual_end) {
     try {
       const meetingDate = new Date(clase.actual_end);
@@ -99,14 +112,12 @@ const downloadTranscriptAndVideoFromZoom = async (clase) => {
   
   const recordingFiles = recordingsRes.data.recording_files || [];
   
-  // Buscar transcripción
   const transcriptFile = recordingFiles.find(
     file => file.file_type === "TRANSCRIPT" || 
             file.recording_type === "audio_transcript" ||
             file.file_extension?.toLowerCase() === "vtt"
   );
   
-  // Buscar video MP4 (prioridad: pantalla + hablante > solo hablante > cualquier MP4)
   const videoFile = recordingFiles.find(
     file => file.file_type === "MP4" && file.recording_type?.includes("shared_screen")
   ) || recordingFiles.find(
@@ -141,7 +152,7 @@ const downloadTranscriptAndVideoFromZoom = async (clase) => {
   return { transcript: transcriptText, video_url: videoUrl };
 };
 
-// === 🤖 CRON JOB: Backup para clases sin webhook ===
+// === CRON JOB: Backup SOLO para transcripciones y videos de clases terminadas ===
 const downloadMissedTranscripts = async () => {
   console.log('\n🔄 [CRON BACKUP] Buscando grabaciones perdidas...\n');
   
@@ -154,8 +165,8 @@ const downloadMissedTranscripts = async () => {
       .from("classes")
       .select("*")
       .eq("status", "ended")
-      .or("transcription.is.null,video_url.is.null")
-      .or("webhook_received.is.null,webhook_received.eq.false")
+      .or(`transcription.is.null,video_url.is.null`)
+      .or(`webhook_received.is.null,webhook_received.eq.false`)
       .gte("actual_end", thirtyDaysAgo.toISOString())
       .lte("actual_end", tenMinutesAgo.toISOString())
       .order("actual_end", { ascending: false })
@@ -205,7 +216,7 @@ const downloadMissedTranscripts = async () => {
   }
 };
 
-// === ⏰ PROGRAMAR CRON JOB ===
+// === PROGRAMAR CRON JOB ===
 cron.schedule('0 */6 * * *', downloadMissedTranscripts);
 setTimeout(downloadMissedTranscripts, 2 * 60 * 1000);
 
@@ -268,6 +279,43 @@ const calculatePunctuality = (clase) => {
   return result;
 };
 
+// === ENDPOINT TEMPORAL: Rellenar supervisor_url en clases live y scheduled existentes ===
+app.get("/fix-supervisor-urls", async (req, res) => {
+  try {
+    const { data: classes } = await supabase
+      .from("classes")
+      .select("id, zoom_meeting_id, supervisor_url, status")
+      .in("status", ["live", "scheduled"])
+      .is("supervisor_url", null)
+      .limit(50);
+
+    if (!classes || classes.length === 0) {
+      return res.json({ message: "Todas las clases live/scheduled ya tienen supervisor_url o no hay pendientes" });
+    }
+
+    let updated = 0;
+    for (const clase of classes) {
+      if (clase.zoom_meeting_id) {
+        const url = await getSupervisorUrl(clase.zoom_meeting_id);
+        if (url) {
+          await supabase
+            .from("classes")
+            .update({ supervisor_url: url })
+            .eq("id", clase.id);
+          updated++;
+          console.log(`✅ supervisor_url actualizado para clase ${clase.id} (${clase.status})`);
+        }
+      }
+      await new Promise(r => setTimeout(r, 500)); // Evitar rate limit
+    }
+
+    res.json({ message: `¡Listo! ${updated} clases live/scheduled actualizadas con supervisor_url` });
+  } catch (err) {
+    console.error("Error en fix-supervisor-urls:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // === WEBHOOKS ===
 app.post("/webhook", async (req, res) => {
   try {
@@ -287,7 +335,7 @@ app.post("/webhook", async (req, res) => {
 
     const m = req.body.payload.object;
 
-    // REUNIÓN CREADA
+    // REUNIÓN CREADA - Guardamos supervisor_url desde el principio
     if (req.body.event === "meeting.created") {
       const token = await getToken();
       const detail = await axios.get(`https://api.zoom.us/v2/meetings/${m.id}`, {
@@ -306,6 +354,8 @@ app.post("/webhook", async (req, res) => {
         if (startTimeIso && !startTimeIso.endsWith('Z')) startTimeIso += 'Z';
         if (!startTimeIso || startTimeIso === 'Z') continue;
 
+        const supervisor_url = meeting.start_url || null;
+
         await supabase.from("classes").upsert({
           zoom_meeting_id: String(meeting.id),
           zoom_uuid: meeting.uuid || null,
@@ -314,7 +364,8 @@ app.post("/webhook", async (req, res) => {
           host_email: meeting.host_email || "desconocido",
           scheduled_start: startTimeIso,
           duration_minutes: occ.duration || meeting.duration || 60,
-          status: "scheduled"
+          status: "scheduled",
+          supervisor_url: supervisor_url
         }, { onConflict: ["zoom_meeting_id", "occurrence_id"] });
       }
       return res.status(200).json({ status: "OK" });
@@ -367,7 +418,7 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ status: "OK" });
     }
 
-    // ✅ TRANSCRIPCIÓN COMPLETADA (WEBHOOK PRINCIPAL)
+    // TRANSCRIPCIÓN COMPLETADA
     if (req.body.event === "recording.transcript_completed") {
       console.log("📄 WEBHOOK: Grabación completada (transcripción y/o video)");
       
@@ -377,14 +428,12 @@ app.post("/webhook", async (req, res) => {
       
       const token = await getToken();
       
-      // Buscar transcripción
       const transcriptFile = recordingFiles.find(f => 
         f.file_type === "TRANSCRIPT" || 
         f.recording_type === "audio_transcript" || 
         f.file_extension?.toLowerCase() === "vtt"
       );
       
-      // Buscar video MP4
       const videoFile = recordingFiles.find(f => 
         f.file_type === "MP4" && f.recording_type?.includes("shared_screen")
       ) || recordingFiles.find(f => f.file_type === "MP4");
@@ -466,7 +515,6 @@ app.get("/api/transcript/:uuid", async (req, res) => {
   
   if (!clase) return res.status(404).json({ meeting: null, transcript: null, video_url: null });
   
-  // Si ya tiene contenido, devolverlo
   if (clase.transcription || clase.video_url) {
     return res.json({ 
       meeting: clase, 
@@ -475,7 +523,6 @@ app.get("/api/transcript/:uuid", async (req, res) => {
     });
   }
   
-  // Fallback: intentar descargar de Zoom
   try {
     const { transcript, video_url } = await downloadTranscriptAndVideoFromZoom(clase);
     if (transcript || video_url) {
@@ -516,7 +563,9 @@ app.listen(PORT, () => {
 📡 Puerto: ${PORT}
 🎥 Soporte para Video MP4 + Transcripción
 ✅ Webhook Principal: recording.transcript_completed
-🔄 Cron Backup: Cada 6 horas
+🔄 Cron Backup: Cada 6 horas (solo ended)
+👤 Supervisor: start_url para live/scheduled
+🔧 Fix manual: /fix-supervisor-urls (ejecutar una vez)
 📊 Health: /health
 ==========================================
   `);
