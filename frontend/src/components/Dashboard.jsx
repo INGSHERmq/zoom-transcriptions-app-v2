@@ -6,7 +6,7 @@ import MeetingCard from './MeetingCard'
 export default function Dashboard() {
   const [data, setData] = useState({ live: [], past: [], scheduled: [], noAperturadas: [] })
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('proximas')
+  const [activeTab, setActiveTab] = useState('live')
   const [lastUpdate, setLastUpdate] = useState(null)
   
   // Ref para evitar que el loading afecte las actualizaciones automáticas
