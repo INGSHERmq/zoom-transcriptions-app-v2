@@ -1,7 +1,7 @@
 // src/services/claseApi.js
 import axios from 'axios'
 
-const API_BASE = 'https://ashley-nonrevenue-genny.ngrok-free.dev'
+const API_BASE = 'https://nautical-stringless-essie.ngrok-free.dev'
 
 const instance = axios.create({
   baseURL: API_BASE,
